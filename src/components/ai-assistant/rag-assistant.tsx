@@ -6,8 +6,8 @@
  * - вся интерактивность (upload/chat/state) живёт здесь.
  *
  * Поток состояния:
- * file → POST /api/rag (multipart) → session
- * question → append user message → POST /api/rag (JSON query) → append assistant
+ * file → POST /api/rag (multipart ingest) → session.documentId в Supabase
+ * question → POST /api/rag (JSON query + documentId) → match_chunks → LLM
  */
 
 "use client";
@@ -50,7 +50,7 @@ export function RagAssistant() {
       form.append("action", "ingest");
 
       setStatus("indexing");
-      setStatusMessage("Извлечение текста, нарезка чанков, построение embeddings…");
+      setStatusMessage("Embeddings + запись в Supabase (document_chunks)…");
 
       const response = await fetch("/api/rag", {
         method: "POST",
@@ -70,7 +70,7 @@ export function RagAssistant() {
       setSession(payload.session);
       setStatus("ready");
       setStatusMessage(
-        `Индекс готов: ${payload.session.chunks.length} чанков из «${payload.session.file.name}»`,
+        `В Supabase записано ${payload.session.chunkCount} чанков из «${payload.session.file.name}»`,
       );
       setMessages([
         {
@@ -104,7 +104,7 @@ export function RagAssistant() {
       };
       setMessages((prev) => [...prev, userMessage]);
       setStatus("thinking");
-      setStatusMessage("Semantic search + генерация ответа LLM…");
+      setStatusMessage("rpc('match_chunks') + генерация ответа LLM…");
 
       try {
         const response = await fetch("/api/rag", {
@@ -113,7 +113,7 @@ export function RagAssistant() {
           body: JSON.stringify({
             action: "query",
             question,
-            chunks: session.chunks,
+            documentId: session.documentId,
             topK: 4,
           }),
         });
@@ -172,8 +172,9 @@ export function RagAssistant() {
         </h2>
         <p className="max-w-2xl text-sm leading-relaxed text-muted">
           Загрузите документ → система разобьёт его на чанки и построит
-          embeddings → ваш вопрос ищет ближайшие фрагменты → LLM отвечает
-          строго по найденному контексту.
+          embeddings → чанки пишутся в Supabase (pgvector) → вопрос ищет
+          ближайшие фрагменты через <code className="text-foreground">match_chunks</code> →
+          LLM отвечает строго по найденному контексту.
         </p>
       </header>
 

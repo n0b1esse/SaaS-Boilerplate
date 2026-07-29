@@ -17,9 +17,10 @@
  * - anon key безопасен только вместе с Row Level Security (RLS) в Postgres;
  * - service_role ключ сюда НЕ кладём никогда.
  *
- * Поток для RAG (будущий шаг):
- * UI → browser client → supabase.from('documents').select / rpc('match_documents')
- * → Postgres + pgvector → строки чанков обратно в UI/API.
+ * Поток для RAG:
+ * UI → /api/rag (server) → createSupabaseServerClient()
+ * → from('document_chunks') / rpc('match_chunks')
+ * → Postgres + pgvector → JSON обратно в Next.js.
  */
 
 import { createBrowserClient } from "@supabase/ssr";

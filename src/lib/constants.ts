@@ -79,11 +79,11 @@ export const PLATFORM_MODULES: readonly PlatformModule[] = [
     summary:
       "Чат-ассистент с Retrieval-Augmented Generation: отвечает по вашим документам, а не только по общим знаниям модели.",
     architecture:
-      "UI чата → POST /api/rag → extract+chunk → embeddings → cosine top-k → LLM. MVP хранит векторы в клиентской session; дальше — pgvector.",
+      "UI → POST /api/rag → chunk+embed → INSERT document_chunks (Supabase/pgvector) → rpc('match_chunks') → LLM.",
     href: "/ai-assistant",
     icon: "bot",
     status: "active",
-    tag: "RAG · Embeddings · Vector DB",
+    tag: "RAG · Embeddings · Supabase pgvector",
   },
   {
     id: "collaboration",

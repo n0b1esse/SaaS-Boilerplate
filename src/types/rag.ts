@@ -1,130 +1,90 @@
 /**
  * Типы модуля AI RAG Assistant.
  *
- * ЗАЧЕМ этот файл нужен:
- * - фиксирует контракт данных между UI (`/ai-assistant`), API (`/api/rag`)
- *   и бизнес-логикой в `src/lib/rag/*`;
- * - без единого контракта легко «разъехаться» по полям chunk/message.
- *
- * Поток данных (учебная схема):
- * Файл → extractText → chunks[] → embeddings[] → RagDocumentSession (на клиенте)
- * → вопрос пользователя → cosineSimilarity → top-k контекст → LLM → ChatMessage.
+ * Поток данных (после интеграции Supabase/pgvector):
+ * Файл/текст → extract/chunk → embeddings
+ * → INSERT document_chunks (Supabase)
+ * → вопрос → embed → rpc('match_chunks') → top-k
+ * → LLM → ChatMessage.
  */
 
 /**
  * Роль участника диалога в чате.
  * - user      — сообщение человека
  * - assistant — ответ модели (после RAG)
- * - system    — служебные подсказки UI (не обязательно уходит в LLM)
+ * - system    — служебные подсказки UI
  */
 export type ChatRole = "user" | "assistant" | "system";
 
 /**
  * Одно сообщение в истории чата.
- * UI рендерит список ChatMessage[]; API query принимает question отдельно,
- * а историю можно позже прокинуть в LLM как conversational context.
  */
 export interface ChatMessage {
-  /** Уникальный id сообщения (для React key и будущих реакций/удаления) */
+  /** Уникальный id сообщения (React key) */
   readonly id: string;
   /** Кто автор сообщения */
   readonly role: ChatRole;
-  /** Текст сообщения, который видит пользователь */
+  /** Текст сообщения */
   readonly content: string;
-  /** ISO-время создания — для сортировки и отображения метки времени */
+  /** ISO-время создания */
   readonly createdAt: string;
-  /**
-   * Опционально: какие чанки реально попали в промпт при генерации ответа.
-   * Полезно для отладки RAG («почему модель так ответила»).
-   */
+  /** Чанки, попавшие в промпт (для отладки RAG) */
   readonly sources?: readonly RetrievedChunk[];
 }
 
-/**
- * Допустимые MIME/расширения для загрузки в MVP.
- * Расширим позже (md, docx) — тогда обновим и парсер, и этот union.
- */
+/** Допустимые MIME для upload MVP */
 export type RagSupportedMime =
   | "text/plain"
   | "application/pdf"
   | "application/octet-stream";
 
-/**
- * Метаданные загруженного файла (без бинарного содержимого).
- * Бинарь живёт только на время ingest-запроса; в state UI храним метаданные.
- */
+/** Метаданные файла без бинарного содержимого */
 export interface RagFileMeta {
-  /** Оригинальное имя файла с диска пользователя */
   readonly name: string;
-  /** MIME-тип, который прислал браузер (может быть неточным) */
   readonly mimeType: string;
-  /** Размер в байтах — для UI и лимитов */
   readonly sizeBytes: number;
 }
 
-/**
- * Один текстовый фрагмент (chunk) после нарезки документа.
- *
- * ЗАЧЕМ чанки:
- * - LLM и embedding-модели имеют лимит контекста;
- * - поиск по смыслу работает точнее на небольших абзацах, чем по целому PDF.
- */
+/** Текстовый фрагмент после нарезки (ещё без вектора) */
 export interface TextChunk {
-  /** Порядковый номер чанка внутри документа (0-based) */
   readonly index: number;
-  /** Текст фрагмента, который пойдёт в embedding и (при отборе) в промпт */
   readonly content: string;
-  /** Примерное число символов — удобно для UI/отладки */
   readonly charCount: number;
 }
 
 /**
- * Чанк + векторное представление (embedding).
- * Именно эта структура — «мини vector store» на стороне клиента в MVP.
- *
- * Позже заменим на Postgres/pgvector: тогда embeddings останутся на сервере.
+ * Чанк + embedding.
+ * Используется на сервере перед INSERT в document_chunks.
+ * На клиент больше не гоняем тяжёлые векторы.
  */
 export interface EmbeddedChunk extends TextChunk {
-  /**
-   * Числовой вектор фиксированной размерности (например, 1536 для
-   * text-embedding-3-small). Сходство считается через cosineSimilarity.
-   */
   readonly embedding: readonly number[];
 }
 
-/**
- * Чанк, отобранный retriever'ом для ответа на конкретный вопрос.
- * Добавляем score, чтобы в UI/логах было видно «насколько релевантен» фрагмент.
- */
+/** Чанк, отобранный retriever'ом (из match_chunks) */
 export interface RetrievedChunk extends TextChunk {
-  /** Cosine similarity вопроса и чанка: чем ближе к 1, тем релевантнее */
+  /** Cosine similarity вопроса и чанка */
   readonly score: number;
 }
 
 /**
- * Сессия документа после успешного ingest.
- * Клиент держит её в React state и отправляет chunks обратно при каждом query.
- *
- * ЗАЧЕМ так (без БД):
- * - на Vercel serverless память процесса не переживает запрос;
- * - для учебного MVP достаточно «vector store в браузере».
+ * Лёгкая сессия документа на клиенте.
+ * Векторы живут в Supabase; UI хранит только documentId и метаданные.
  */
 export interface RagDocumentSession {
-  /** Случайный id сессии документа */
+  /** UUID документа (metadata.document_id в БД) */
   readonly documentId: string;
-  /** Метаданные исходного файла */
+  /** Метаданные исходного файла/текста */
   readonly file: RagFileMeta;
-  /** Чанки с эмбеддингами — готовы к semantic search */
-  readonly chunks: readonly EmbeddedChunk[];
-  /** Когда документ был проиндексирован */
+  /** Сколько чанков записали в Supabase */
+  readonly chunkCount: number;
+  /** Когда документ проиндексировали */
   readonly ingestedAt: string;
-  /** Сколько символов исходного текста удалось извлечь */
+  /** Сколько символов исходного текста */
   readonly extractedCharCount: number;
 }
 
-/**
- * Статусы UI модуля — управляют индикатором и disabled-состоянием кнопок.
- */
+/** Статусы UI модуля */
 export type RagUiStatus =
   | "idle"
   | "uploading"
@@ -133,55 +93,54 @@ export type RagUiStatus =
   | "thinking"
   | "error";
 
-/**
- * Действия единого API `/api/rag`.
- * Один route — два сценария: ingest файла и query по вопросу.
- */
+/** Действия API /api/rag */
 export type RagApiAction = "ingest" | "query";
 
 /**
- * Тело JSON-запроса на генерацию ответа (action=query).
+ * JSON query: вопрос + documentId (поиск идёт в Supabase, не по клиентским chunks).
  */
 export interface RagQueryRequest {
   readonly action: "query";
-  /** Вопрос пользователя из поля ввода чата */
+  /** Вопрос / текст пользователя */
   readonly question: string;
-  /** Уже проиндексированные чанки текущей сессии документа */
-  readonly chunks: readonly EmbeddedChunk[];
-  /** Сколько top-k фрагментов класть в промпт (по умолчанию на сервере = 4) */
+  /** UUID документа, по которому ищем в match_chunks */
+  readonly documentId: string;
   readonly topK?: number;
+  readonly matchThreshold?: number;
 }
 
 /**
- * Успешный ответ ingest.
+ * JSON ingest сырого текста (без файла).
+ * Удобно для тестов и будущих Server Actions.
  */
+export interface RagIngestTextRequest {
+  readonly action: "ingest";
+  readonly text: string;
+  readonly filename?: string;
+}
+
+/** Успешный ответ ingest */
 export interface RagIngestResponse {
   readonly ok: true;
   readonly action: "ingest";
   readonly session: RagDocumentSession;
 }
 
-/**
- * Успешный ответ query.
- */
+/** Успешный ответ query */
 export interface RagQueryResponse {
   readonly ok: true;
   readonly action: "query";
-  /** Готовый текст ответа ассистента */
   readonly answer: string;
-  /** Какие чанки попали в контекст промпта */
   readonly sources: readonly RetrievedChunk[];
 }
 
-/**
- * Единый формат ошибки API — UI показывает message пользователю.
- */
+/** Ошибка API */
 export interface RagErrorResponse {
   readonly ok: false;
   readonly error: string;
-  /** Опциональный машинный код для ветвления в UI */
   readonly code?:
     | "MISSING_API_KEY"
+    | "MISSING_SUPABASE"
     | "UNSUPPORTED_FILE"
     | "EMPTY_DOCUMENT"
     | "NO_CHUNKS"
@@ -189,7 +148,6 @@ export interface RagErrorResponse {
     | "INTERNAL";
 }
 
-/** Discriminated union ответов `/api/rag` */
 export type RagApiResponse =
   | RagIngestResponse
   | RagQueryResponse

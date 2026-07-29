@@ -39,10 +39,11 @@ import {
  * ```ts
  * // src/app/api/rag/route.ts
  * const supabase = createSupabaseServerClient();
- * const { data, error } = await supabase.rpc("match_documents", {
+ * const { data, error } = await supabase.rpc("match_chunks", {
  *   query_embedding: embedding,
  *   match_count: 4,
- *   match_threshold: 0.7,
+ *   match_threshold: 0.5,
+ *   filter_document_id: documentId,
  * });
  * ```
  */

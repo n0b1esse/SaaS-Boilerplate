@@ -1,21 +1,23 @@
 /**
- * API Route: `/api/rag`
+ * API Route: `/api/rag` — RAG на Supabase pgvector.
  *
- * Единая точка входа модуля AI RAG Assistant.
+ * Сценарии:
+ * 1) ingest (multipart file ИЛИ JSON { action:'ingest', text })
+ *    → текст → чанки → embeddings → INSERT document_chunks
+ * 2) query  (JSON { action:'query', question, documentId })
+ *    → embed(question) → rpc('match_chunks') → LLM ответ
  *
- * Два сценария (поле action):
- * 1) ingest — multipart/form-data с файлом → текст → чанки → embeddings → session
- * 2) query  — JSON { question, chunks } → embed вопроса → top-k → LLM ответ
- *
- * Полный поток данных:
- * UI upload → POST ingest → RagDocumentSession (в React state)
- * UI ask    → POST query  → answer + sources → ChatMessage в истории
- *
- * ВАЖНО (MVP): vector store живёт на клиенте в session.chunks.
- * На serverless нельзя надёжно держать Map в памяти между запросами.
+ * Поток данных целиком:
+ * Browser UI
+ *   → POST /api/rag
+ *   → createSupabaseServerClient()
+ *   → PostgREST / RPC на Supabase
+ *   → Postgres + pgvector
+ *   → JSON обратно в UI.
  */
 
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 
 import { splitTextIntoChunks } from "@/lib/rag/chunking";
 import { embedQuery, embedTextChunks } from "@/lib/rag/embeddings";
@@ -27,13 +29,15 @@ import {
 import { generateRagAnswer } from "@/lib/rag/generate";
 import { assertAiCredentials } from "@/lib/rag/provider";
 import {
-  DEFAULT_TOP_K,
-  retrieveRelevantChunks,
-} from "@/lib/rag/similarity";
+  deleteChunksByDocumentId,
+  insertEmbeddedChunks,
+  matchChunksFromSupabase,
+} from "@/lib/rag/vector-store";
+import { hasSupabaseCredentials } from "@/lib/supabase/env";
 import type {
-  EmbeddedChunk,
   RagApiResponse,
   RagErrorResponse,
+  RagIngestTextRequest,
   RagQueryRequest,
 } from "@/types/rag";
 
@@ -41,7 +45,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Хелпер: единообразный JSON с ошибкой для UI.
+ * Единый JSON с ошибкой для UI.
  */
 function errorResponse(
   error: string,
@@ -49,61 +53,121 @@ function errorResponse(
   status: number,
 ): NextResponse<RagApiResponse> {
   return NextResponse.json(
-    {
-      ok: false,
-      error,
-      code,
-    } satisfies RagErrorResponse,
+    { ok: false, error, code } satisfies RagErrorResponse,
     { status },
   );
 }
 
 /**
- * Генерирует простой уникальный id без внешних зависимостей.
+ * Проверяет, что заданы ключи OpenAI/Gateway.
  */
-function createId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/**
- * Проверяет, что массив чанков похож на EmbeddedChunk[].
- * ЗАЧЕМ: не доверяем клиенту слепо — минимальная runtime-валидация.
- */
-function isEmbeddedChunks(value: unknown): value is EmbeddedChunk[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    return false;
-  }
-
-  return value.every((item) => {
-    if (typeof item !== "object" || item === null) {
-      return false;
-    }
-    const chunk = item as Record<string, unknown>;
-    return (
-      typeof chunk.index === "number" &&
-      typeof chunk.content === "string" &&
-      typeof chunk.charCount === "number" &&
-      Array.isArray(chunk.embedding) &&
-      chunk.embedding.every((n) => typeof n === "number")
-    );
-  });
-}
-
-/**
- * INGEST: файл → текст → чанки → векторы → session для клиента.
- */
-async function handleIngest(
-  request: Request,
-): Promise<NextResponse<RagApiResponse>> {
+function ensureAiKeys(): NextResponse<RagApiResponse> | null {
   try {
     assertAiCredentials();
+    return null;
   } catch (error) {
     return errorResponse(
-      error instanceof Error ? error.message : "Нет API-ключа",
+      error instanceof Error ? error.message : "Нет API-ключа AI",
       "MISSING_API_KEY",
       401,
     );
   }
+}
+
+/**
+ * Проверяет, что заданы NEXT_PUBLIC_SUPABASE_URL / ANON_KEY.
+ */
+function ensureSupabase(): NextResponse<RagApiResponse> | null {
+  if (!hasSupabaseCredentials()) {
+    return errorResponse(
+      "Не заданы NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY. Добавьте их в Vercel Environment Variables и выполните supabase/schema.sql.",
+      "MISSING_SUPABASE",
+      503,
+    );
+  }
+  return null;
+}
+
+/**
+ * Общий пайплайн индексации текста в Supabase.
+ *
+ * Шаги:
+ * 1) нарезать текст на чанки
+ * 2) получить embeddings через AI SDK
+ * 3) записать строки в document_chunks
+ */
+async function ingestTextToSupabase(params: {
+  readonly text: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly source: "file" | "text";
+}): Promise<NextResponse<RagApiResponse>> {
+  const normalized = params.text.trim();
+  if (!normalized) {
+    return errorResponse(
+      "Пустой текст — нечего индексировать",
+      "EMPTY_DOCUMENT",
+      400,
+    );
+  }
+
+  // UUID документа: все чанки получат metadata.document_id = этот id
+  const documentId = randomUUID();
+
+  // Нарезка длинного текста на перекрывающиеся окна
+  const textChunks = splitTextIntoChunks(normalized);
+  if (textChunks.length === 0) {
+    return errorResponse(
+      "После нарезки не осталось чанков",
+      "EMPTY_DOCUMENT",
+      400,
+    );
+  }
+
+  // Batch-эмбеддинги всех чанков (OpenAI text-embedding-3-small → 1536 dims)
+  const embeddedChunks = await embedTextChunks(textChunks);
+
+  // На всякий случай чистим одноимённый document_id (для идемпотентности)
+  await deleteChunksByDocumentId(documentId);
+
+  // INSERT в public.document_chunks через PostgREST
+  const inserted = await insertEmbeddedChunks({
+    documentId,
+    chunks: embeddedChunks,
+    filename: params.filename,
+    mimeType: params.mimeType,
+    source: params.source,
+  });
+
+  // Клиенту отдаём лёгкую session без векторов
+  return NextResponse.json({
+    ok: true,
+    action: "ingest",
+    session: {
+      documentId,
+      file: {
+        name: params.filename,
+        mimeType: params.mimeType,
+        sizeBytes: params.sizeBytes,
+      },
+      chunkCount: inserted,
+      ingestedAt: new Date().toISOString(),
+      extractedCharCount: normalized.length,
+    },
+  } satisfies RagApiResponse);
+}
+
+/**
+ * INGEST файла (multipart/form-data с полем file).
+ */
+async function handleFileIngest(
+  request: Request,
+): Promise<NextResponse<RagApiResponse>> {
+  const aiError = ensureAiKeys();
+  if (aiError) return aiError;
+  const sbError = ensureSupabase();
+  if (sbError) return sbError;
 
   const form = await request.formData();
   const fileEntry = form.get("file");
@@ -125,41 +189,19 @@ async function handleIngest(
   }
 
   try {
+    // PDF/TXT → чистая строка
     const rawText = await extractFileText(fileEntry);
-    if (!rawText) {
-      return errorResponse(
-        "Не удалось извлечь текст из файла (документ пуст?)",
-        "EMPTY_DOCUMENT",
-        400,
-      );
-    }
+    const meta = toRagFileMeta(fileEntry);
 
-    const textChunks = splitTextIntoChunks(rawText);
-    if (textChunks.length === 0) {
-      return errorResponse(
-        "После нарезки не осталось чанков",
-        "EMPTY_DOCUMENT",
-        400,
-      );
-    }
-
-    const embeddedChunks = await embedTextChunks(textChunks);
-
-    const session = {
-      documentId: createId("doc"),
-      file: toRagFileMeta(fileEntry),
-      chunks: embeddedChunks,
-      ingestedAt: new Date().toISOString(),
-      extractedCharCount: rawText.length,
-    };
-
-    return NextResponse.json({
-      ok: true,
-      action: "ingest",
-      session,
-    } satisfies RagApiResponse);
+    return await ingestTextToSupabase({
+      text: rawText,
+      filename: meta.name,
+      mimeType: meta.mimeType,
+      sizeBytes: meta.sizeBytes,
+      source: "file",
+    });
   } catch (error) {
-    console.error("[rag/ingest]", error);
+    console.error("[rag/ingest-file]", error);
     return errorResponse(
       error instanceof Error ? error.message : "Ошибка индексации файла",
       "INTERNAL",
@@ -169,41 +211,88 @@ async function handleIngest(
 }
 
 /**
- * QUERY: вопрос + чанки → retrieval → LLM → ответ.
+ * INGEST сырого текста (JSON).
+ * Тело: { action: 'ingest', text: '...', filename?: 'note.txt' }
+ */
+async function handleTextIngest(
+  body: RagIngestTextRequest,
+): Promise<NextResponse<RagApiResponse>> {
+  const aiError = ensureAiKeys();
+  if (aiError) return aiError;
+  const sbError = ensureSupabase();
+  if (sbError) return sbError;
+
+  try {
+    const filename = body.filename?.trim() || "pasted-text.txt";
+    const text = body.text ?? "";
+
+    return await ingestTextToSupabase({
+      text,
+      filename,
+      mimeType: "text/plain",
+      sizeBytes: Buffer.byteLength(text, "utf8"),
+      source: "text",
+    });
+  } catch (error) {
+    console.error("[rag/ingest-text]", error);
+    return errorResponse(
+      error instanceof Error ? error.message : "Ошибка индексации текста",
+      "INTERNAL",
+      500,
+    );
+  }
+}
+
+/**
+ * QUERY: принять текст вопроса → embedding → match_chunks → LLM.
+ *
+ * Это основной RAG-эндпоинт после загрузки документа.
  */
 async function handleQuery(
   body: RagQueryRequest,
 ): Promise<NextResponse<RagApiResponse>> {
-  try {
-    assertAiCredentials();
-  } catch (error) {
-    return errorResponse(
-      error instanceof Error ? error.message : "Нет API-ключа",
-      "MISSING_API_KEY",
-      401,
-    );
-  }
+  const aiError = ensureAiKeys();
+  if (aiError) return aiError;
+  const sbError = ensureSupabase();
+  if (sbError) return sbError;
 
+  // Текст вопроса от пользователя (из чата)
   const question = body.question?.trim();
   if (!question) {
     return errorResponse("Вопрос не должен быть пустым", "BAD_REQUEST", 400);
   }
 
-  if (!isEmbeddedChunks(body.chunks)) {
+  // Без documentId не знаем, в каком «файле» искать
+  const documentId = body.documentId?.trim();
+  if (!documentId) {
     return errorResponse(
-      "Нет проиндексированных чанков. Сначала загрузите файл.",
-      "NO_CHUNKS",
+      "Нужен documentId. Сначала выполните ingest файла/текста.",
+      "BAD_REQUEST",
       400,
     );
   }
 
   try {
+    // 1) Векторизуем вопрос той же embedding-моделью, что и чанки
     const questionEmbedding = await embedQuery(question);
-    const sources = retrieveRelevantChunks(
-      questionEmbedding,
-      body.chunks,
-      body.topK ?? DEFAULT_TOP_K,
-    );
+
+    // 2) Cosine-поиск в Postgres через rpc('match_chunks')
+    const sources = await matchChunksFromSupabase({
+      queryEmbedding: questionEmbedding,
+      matchCount: body.topK ?? 4,
+      matchThreshold: body.matchThreshold ?? 0.5,
+      documentId,
+    });
+
+    if (sources.length === 0) {
+      return errorResponse(
+        "Похожие фрагменты не найдены. Загрузите документ или снизьте matchThreshold.",
+        "NO_CHUNKS",
+        404,
+      );
+    }
+
+    // 3) Собираем промпт из top-k и генерируем ответ LLM
     const answer = await generateRagAnswer(question, sources);
 
     return NextResponse.json({
@@ -224,18 +313,21 @@ async function handleQuery(
 
 /**
  * POST /api/rag
- * - Content-Type multipart → ingest
- * - Content-Type JSON → query (action обязателен)
+ * - multipart/form-data → ingest файла
+ * - JSON action=ingest → ingest текста
+ * - JSON action=query  → вопрос + match_chunks + LLM
  */
 export async function POST(
   request: Request,
 ): Promise<NextResponse<RagApiResponse>> {
   const contentType = request.headers.get("content-type") ?? "";
 
+  // Ветка загрузки файла (drag-and-drop из UI)
   if (contentType.includes("multipart/form-data")) {
-    return handleIngest(request);
+    return handleFileIngest(request);
   }
 
+  // Ветка JSON (query или ingest текста)
   let body: unknown;
   try {
     body = await request.json();
@@ -243,17 +335,26 @@ export async function POST(
     return errorResponse("Некорректный JSON", "BAD_REQUEST", 400);
   }
 
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "action" in body &&
-    (body as { action: unknown }).action === "query"
-  ) {
+  if (typeof body !== "object" || body === null || !("action" in body)) {
+    return errorResponse(
+      "Ожидается JSON с полем action: 'ingest' | 'query'",
+      "BAD_REQUEST",
+      400,
+    );
+  }
+
+  const action = (body as { action: unknown }).action;
+
+  if (action === "query") {
     return handleQuery(body as RagQueryRequest);
   }
 
+  if (action === "ingest") {
+    return handleTextIngest(body as RagIngestTextRequest);
+  }
+
   return errorResponse(
-    "Неизвестное действие. Используйте multipart ingest или JSON { action: 'query' }",
+    "Неизвестное action. Используйте 'ingest' или 'query'.",
     "BAD_REQUEST",
     400,
   );

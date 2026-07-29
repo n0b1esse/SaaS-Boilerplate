@@ -122,7 +122,7 @@ export function FileUploader({
               {session.file.name}
             </p>
             <p className="text-muted">
-              {session.chunks.length} чанков ·{" "}
+              {session.chunkCount} чанков в Supabase ·{" "}
               {session.extractedCharCount.toLocaleString("ru-RU")} символов ·{" "}
               {(session.file.sizeBytes / 1024).toFixed(1)} КБ
             </p>

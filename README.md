@@ -51,7 +51,7 @@ flowchart TB
 
 | Модуль | Маршрут | Идея потока данных |
 |--------|---------|--------------------|
-| AI RAG Assistant | `/ai-assistant` | Upload → chunk → embed → top-k → LLM (`/api/rag`) |
+| AI RAG Assistant | `/ai-assistant` | Upload → embed → `document_chunks` → `match_chunks` → LLM |
 | Real-time Workspace | `/collaboration` | CRDT → WebSocket → Redis → Postgres |
 | FinTech Analytics | `/analytics` | Events → aggregations → charts |
 | Dev CLI / Logs | `/cli-logs` | Structured logs → collector → UI/CLI |
