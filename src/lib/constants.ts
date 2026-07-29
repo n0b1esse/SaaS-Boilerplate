@@ -79,10 +79,10 @@ export const PLATFORM_MODULES: readonly PlatformModule[] = [
     summary:
       "Чат-ассистент с Retrieval-Augmented Generation: отвечает по вашим документам, а не только по общим знаниям модели.",
     architecture:
-      "UI чата → Server Actions → Embeddings → Vector Store (pgvector/Qdrant) → LLM. Источники знаний индексируются пайплайном ingestion.",
+      "UI чата → POST /api/rag → extract+chunk → embeddings → cosine top-k → LLM. MVP хранит векторы в клиентской session; дальше — pgvector.",
     href: "/ai-assistant",
     icon: "bot",
-    status: "scaffolding",
+    status: "active",
     tag: "RAG · Embeddings · Vector DB",
   },
   {

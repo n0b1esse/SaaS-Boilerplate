@@ -18,6 +18,14 @@ const nextConfig = {
    * (двойной вызов эффектов) — полезно для учебного проекта.
    */
   reactStrictMode: true,
+
+  /**
+   * Next.js 14: выносим unpdf из бандла server components / route handlers.
+   * (В Next 15+ ключ переименован в serverExternalPackages.)
+   */
+  experimental: {
+    serverComponentsExternalPackages: ["unpdf"],
+  },
 };
 
 export default nextConfig;

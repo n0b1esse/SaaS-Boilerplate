@@ -1,17 +1,20 @@
 /**
- * Заглушка модуля AI RAG Assistant (`/ai-assistant`).
+ * Страница модуля AI RAG Assistant (`/ai-assistant`).
  *
- * Целевой поток данных (будущее):
- * UI чата → Server Action → embeddings → vector store → LLM → ответ в UI.
+ * Server Component отдаёт metadata и монтирует клиентский RagAssistant.
+ *
+ * Поток:
+ * page (RSC) → RagAssistant (client) → /api/rag → embeddings + LLM.
  */
 
-import { ModulePlaceholder } from "@/components/dashboard/module-placeholder";
-import { getModuleById } from "@/lib/modules";
+import { RagAssistant } from "@/components/ai-assistant/rag-assistant";
 
 export const metadata = {
   title: "AI RAG Assistant",
+  description:
+    "RAG-чат Nexus Platform: загрузка .txt/.pdf, чанки, embeddings и ответы LLM по контексту документа.",
 };
 
 export default function AiAssistantPage() {
-  return <ModulePlaceholder module={getModuleById("ai-assistant")} />;
+  return <RagAssistant />;
 }

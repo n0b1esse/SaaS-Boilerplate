@@ -8,7 +8,9 @@
 - Tailwind CSS, Dark/Light тема
 - Lucide React, `clsx` + `tailwind-merge` (`cn`)
 - Sidebar / Header / Dashboard с карточками модулей
-- Заглушки маршрутов: `/dashboard`, `/ai-assistant`, `/collaboration`, `/analytics`, `/cli-logs`, `/settings`
+- **Модуль №1 AI RAG Assistant** на `/ai-assistant` (upload .txt/.pdf, чанки, embeddings, чат)
+- API `/api/rag` на Vercel AI SDK (`ai` + `@ai-sdk/openai`)
+- Заглушки: `/collaboration`, `/analytics`, `/cli-logs`, `/settings`
 - Правила менторства в `.cursorrules` (подробные комментарии на русском)
 
 ## Архитектура
@@ -49,7 +51,7 @@ flowchart TB
 
 | Модуль | Маршрут | Идея потока данных |
 |--------|---------|--------------------|
-| AI RAG Assistant | `/ai-assistant` | Chat → embeddings → vector DB → LLM |
+| AI RAG Assistant | `/ai-assistant` | Upload → chunk → embed → top-k → LLM (`/api/rag`) |
 | Real-time Workspace | `/collaboration` | CRDT → WebSocket → Redis → Postgres |
 | FinTech Analytics | `/analytics` | Events → aggregations → charts |
 | Dev CLI / Logs | `/cli-logs` | Structured logs → collector → UI/CLI |
@@ -68,6 +70,23 @@ src/
   types/               # глобальные TypeScript-контракты
 ```
 
+## Деплой на Vercel + env для RAG
+
+Проект рассчитан на открытие через Vercel Preview/Production.
+
+В **Vercel → Project → Settings → Environment Variables** задайте:
+
+| Переменная | Обязательно | Зачем |
+|------------|-------------|--------|
+| `OPENAI_API_KEY` | да* | Прямой доступ к OpenAI (chat + embeddings) |
+| `AI_GATEWAY_API_KEY` | да* | Альтернатива: Vercel AI Gateway |
+| `RAG_CHAT_MODEL` | нет | По умолчанию `gpt-4.1-mini` |
+| `RAG_EMBEDDING_MODEL` | нет | По умолчанию `text-embedding-3-small` |
+
+\* Нужен **хотя бы один** из ключей: `OPENAI_API_KEY` или `AI_GATEWAY_API_KEY`.
+
+После сохранения переменных сделайте Redeploy, откройте `/ai-assistant`, загрузите `.txt`/`.pdf` и задайте вопрос.
+
 ## Локальный запуск
 
 ```bash
@@ -85,7 +104,7 @@ npm run build
 Скопируйте секреты только в локальные env-файлы (они в `.gitignore`):
 
 ```bash
-cp .env.example .env.local   # когда появится .env.example
+cp .env.example .env.local
 ```
 
 ## Первый коммит (если стартуете с нуля)
