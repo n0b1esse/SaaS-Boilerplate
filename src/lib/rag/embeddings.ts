@@ -25,7 +25,7 @@ import type { EmbeddedChunk, TextChunk } from "@/types/rag";
  * Нормализует размерность вектора под vector(768) в Supabase.
  *
  * ЗАЧЕМ:
- * - Gemini `text-embedding-004` целится в 768 измерений;
+ * - Gemini `gemini-embedding-001` по умолчанию 3072d; мы берём первые 768 (MRL).
  * - Postgres `vector(768)` требует фиксированную длину на INSERT/RPC;
  * - trim/pad оставлен как защитный слой, если провайдер вернул нестандартный размер.
  *
@@ -59,6 +59,7 @@ function isMissingEmbeddingModelError(error: unknown): boolean {
   const message = error.message.toLowerCase();
   return (
     message.includes("not found for api version") ||
+    message.includes("models/embedding-001") ||
     message.includes("models/text-embedding-004") ||
     message.includes("model not found")
   );
@@ -69,7 +70,7 @@ function isMissingEmbeddingModelError(error: unknown): boolean {
  *
  * ЗАЧЕМ:
  * - если первичная модель не найдена на конкретной версии API,
- *   повторяем запрос на `embedding-001` без изменения общего RAG-пайплайна.
+ *   повторяем запрос на `gemini-embedding-001` без изменения общего RAG-пайплайна.
  */
 function getFallbackEmbeddingModel() {
   const { geminiKey } = assertAiCredentials();
@@ -101,8 +102,8 @@ export async function embedTextChunks(
   } catch (error) {
     /**
      * Retry-ветка для кейса:
-     * "models/text-embedding-004 is not found for API version v1beta".
-     * Если первичная модель недоступна, уходим на `embedding-001`.
+     * "models/embedding-001 is not found for API version v1beta".
+     * Если первичная модель недоступна, уходим на `gemini-embedding-001`.
      */
     if (!isMissingEmbeddingModelError(error)) {
       throw error;

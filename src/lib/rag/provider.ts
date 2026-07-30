@@ -15,14 +15,15 @@ import type { EmbeddingModel, LanguageModel } from "ai";
 
 /** Имена моделей можно переопределить через env без правки кода */
 const DEFAULT_CHAT_MODEL = "gemini-2.5-flash";
-const DEFAULT_EMBEDDING_MODEL = "embedding-001";
-const EMBEDDING_FALLBACK_MODEL = "embedding-001";
+/** Актуальная GA-модель Gemini Embeddings (legacy embedding-001/text-embedding-004 сняты с v1beta). */
+const DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001";
+const EMBEDDING_FALLBACK_MODEL = "gemini-embedding-001";
 
 /**
  * Целевая размерность векторов под текущую схему Supabase (vector(768)).
  *
  * ПОЧЕМУ 768:
- * - Gemini `text-embedding-004` возвращает embedding длиной 768;
+ * - Gemini `gemini-embedding-001` поддерживает output 768 (MRL-truncate из 3072);
  * - колонка `document_chunks.embedding` в schema.sql синхронизирована на vector(768);
  * - одинаковая размерность в ingest/query обязательна для корректной cosine-метрики.
  */
@@ -69,8 +70,8 @@ export function resolveEmbeddingModelId(): string {
  * Резервная embedding-модель Gemini.
  *
  * ЗАЧЕМ:
- * - некоторые аккаунты/версии API не видят `text-embedding-004` в `v1beta`;
- * - в таком случае делаем безопасный retry на `embedding-001`.
+ * - оставлен для совместимости, если Google переименует модель;
+ * - сейчас primary и fallback совпадают (`gemini-embedding-001`).
  */
 export function getEmbeddingFallbackModelId(): string {
   return EMBEDDING_FALLBACK_MODEL;
@@ -108,7 +109,7 @@ export function resolveRagModels(): RagModels {
     chatModel: google(chatModelId),
     /**
      * КРИТИЧНО: используем корректное имя без префикса `models/`,
-     * например `text-embedding-004` (или `embedding-001` как fallback).
+     * например `gemini-embedding-001`.
      */
     embeddingModel: google.textEmbeddingModel(embeddingModelId),
   };
