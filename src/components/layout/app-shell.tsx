@@ -43,9 +43,14 @@ export function AppShell({ children, title }: AppShellProps) {
         className="pointer-events-none absolute inset-0 bg-nexus-grid bg-grid opacity-[0.35] dark:opacity-[0.2]"
       />
 
-      {/* Desktop sidebar */}
-      <div className="relative z-10 hidden md:block">
-        <Sidebar className="fixed inset-y-0 left-0" />
+      {/*
+        Desktop sidebar: z-30 выше основного контента.
+        ЗАЧЕМ: колонка main с w-full + md:pl-64 визуально отступает,
+        но сам блок всё равно лежит поверх левых 16rem и перехватывает клики.
+        Без более высокого z-index Link'и в Sidebar «не работают».
+      */}
+      <div className="relative z-30 hidden md:block">
+        <Sidebar className="fixed inset-y-0 left-0 z-30" />
       </div>
 
       {/* Mobile drawer */}

@@ -3,6 +3,7 @@
  *
  * ЗАЧЕМ:
  * - единая точка входа во все модули (Dashboard + 5 суб-проектов);
+ * - логотип ведёт на `/` (главная витрина);
  * - подсвечивает активный маршрут через usePathname.
  *
  * Поток данных:
@@ -43,8 +44,21 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
         className,
       )}
     >
-      {/* Бренд: hero-level сигнал внутри shell, не только текст в nav */}
-      <div className="flex items-center gap-3 border-b border-border px-5 py-5">
+      {/*
+        Бренд = ссылка на главную (`/`).
+        ЗАЧЕМ: из любого модуля один клик возвращает на витрину модулей;
+        aria-label дублирует смысл для screen reader.
+      */}
+      <Link
+        href="/"
+        onClick={onNavigate}
+        aria-label="Nexus Platform — на главную"
+        className={cn(
+          "flex items-center gap-3 border-b border-border px-5 py-5",
+          "transition-colors hover:bg-surface-elevated/60",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+        )}
+      >
         <div
           className={cn(
             "flex h-10 w-10 items-center justify-center rounded-xl",
@@ -61,7 +75,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
           </p>
           <p className="truncate text-xs text-muted">Modular SaaS OS</p>
         </div>
-      </div>
+      </Link>
 
       <nav
         className="flex flex-1 flex-col gap-1 overflow-y-auto p-3"
