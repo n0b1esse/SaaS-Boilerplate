@@ -125,7 +125,15 @@ async function ingestTextToSupabase(params: {
     );
   }
 
-  // Batch-эмбеддинги всех чанков через Gemini и нормализация под vector(1536)
+  /**
+   * Batch-эмбеддинги всех чанков через Gemini (`text-embedding-004`).
+   *
+   * ВАЖНО ДЛЯ SUPABASE:
+   * - в провайдере вызывается `google.textEmbeddingModel('text-embedding-004')`
+   *   (без префикса `models/`, он отсекается нормализатором);
+   * - затем embeddings.ts приводит длину вектора к 1536,
+   *   чтобы точно совпасть с колонкой `document_chunks.embedding vector(1536)`.
+   */
   const embeddedChunks = await embedTextChunks(textChunks);
 
   // На всякий случай чистим одноимённый document_id (для идемпотентности)
@@ -273,7 +281,7 @@ async function handleQuery(
   }
 
   try {
-    // 1) Векторизуем вопрос той же embedding-моделью, что и чанки
+    // 1) Векторизуем вопрос той же Gemini embedding-моделью и той же размерностью.
     const questionEmbedding = await embedQuery(question);
 
     // 2) Cosine-поиск в Postgres через rpc('match_chunks')

@@ -31,6 +31,22 @@ export interface RagModels {
 }
 
 /**
+ * Нормализует id модели эмбеддингов для @ai-sdk/google.
+ *
+ * ЗАЧЕМ:
+ * - в некоторых гайдах Gemini указывают имя как `models/text-embedding-004`;
+ * - метод `google.textEmbeddingModel(...)` ожидает короткое имя без `models/`;
+ * - здесь заранее приводим строку к совместимому формату, чтобы route не падал.
+ */
+function normalizeEmbeddingModelId(rawModelId: string): string {
+  const trimmed = rawModelId.trim();
+  if (trimmed.startsWith("models/")) {
+    return trimmed.slice("models/".length);
+  }
+  return trimmed;
+}
+
+/**
  * Читает обязательный API-ключ или бросает понятную ошибку для UI.
  */
 export function assertAiCredentials(): { geminiKey: string } {
@@ -52,8 +68,9 @@ export function resolveRagModels(): RagModels {
   const { geminiKey } = assertAiCredentials();
   const chatModelId =
     process.env.RAG_CHAT_MODEL?.trim() || DEFAULT_CHAT_MODEL;
-  const embeddingModelId =
-    process.env.RAG_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
+  const embeddingModelId = normalizeEmbeddingModelId(
+    process.env.RAG_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL,
+  );
   const google = createGoogleGenerativeAI({
     apiKey: geminiKey,
   });
@@ -61,6 +78,10 @@ export function resolveRagModels(): RagModels {
   return {
     transport: "google-gemini",
     chatModel: google(chatModelId),
+    /**
+     * КРИТИЧНО: используем корректное имя без префикса `models/`,
+     * например `text-embedding-004` (или `embedding-001` как fallback).
+     */
     embeddingModel: google.textEmbeddingModel(embeddingModelId),
   };
 }
