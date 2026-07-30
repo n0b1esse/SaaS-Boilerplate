@@ -80,7 +80,7 @@ function ensureAiKeys(): NextResponse<RagApiResponse> | null {
 function ensureSupabase(): NextResponse<RagApiResponse> | null {
   if (!hasSupabaseCredentials()) {
     return errorResponse(
-      "Не заданы или некорректны NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY. URL должен начинаться с https:// (пример: https://<ref>.supabase.co). Задайте в Vercel → Settings → Environment Variables и сделайте Redeploy.",
+      "Не заданы или некорректны SUPABASE_URL / SUPABASE_ANON_KEY (или NEXT_PUBLIC_*). URL должен начинаться с https://. Задайте в Vercel → Settings → Environment Variables. Для NEXT_PUBLIC_* нужен Redeploy; SUPABASE_* подхватываются на runtime.",
       "MISSING_SUPABASE",
       503,
     );
