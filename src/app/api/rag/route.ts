@@ -93,7 +93,8 @@ function ensureSupabase(): NextResponse<RagApiResponse> | null {
  *
  * Шаги:
  * 1) нарезать текст на чанки
- * 2) получить embeddings через Gemini (`text-embedding-004`)
+ * 2) получить embeddings через Gemini (`embedding-001` по умолчанию,
+ *    при необходимости можно задать `text-embedding-004` без `models/`)
  * 3) записать строки в document_chunks
  */
 async function ingestTextToSupabase(params: {
@@ -126,12 +127,14 @@ async function ingestTextToSupabase(params: {
   }
 
   /**
-   * Batch-эмбеддинги всех чанков через Gemini (`text-embedding-004`).
+   * Batch-эмбеддинги всех чанков через Gemini.
    *
    * ВАЖНО ДЛЯ SUPABASE:
-   * - в провайдере вызывается `google.textEmbeddingModel('text-embedding-004')`
-   *   (без префикса `models/`, он отсекается нормализатором);
-   * - `text-embedding-004` возвращает вектор размерности 768;
+   * - в провайдере вызывается `google.textEmbeddingModel('<model-id>')`;
+   * - id модели всегда без `models/` (префикс отсекается нормализатором);
+   * - по умолчанию используется `embedding-001`, а при ошибке not-found
+   *   для `text-embedding-004` срабатывает автоматический fallback;
+   * - обе модели в нашем пайплайне приводятся к размерности 768;
    * - затем embeddings.ts дополнительно нормализует длину к
    *   `RAG_VECTOR_DIMENSIONS` (= 768), чтобы 1-в-1 совпасть с колонкой
    *   `document_chunks.embedding vector(768)` в Supabase.

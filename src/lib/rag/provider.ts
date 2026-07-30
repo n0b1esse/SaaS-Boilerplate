@@ -15,7 +15,8 @@ import type { EmbeddingModel, LanguageModel } from "ai";
 
 /** Имена моделей можно переопределить через env без правки кода */
 const DEFAULT_CHAT_MODEL = "gemini-2.5-flash";
-const DEFAULT_EMBEDDING_MODEL = "text-embedding-004";
+const DEFAULT_EMBEDDING_MODEL = "embedding-001";
+const EMBEDDING_FALLBACK_MODEL = "embedding-001";
 
 /**
  * Целевая размерность векторов под текущую схему Supabase (vector(768)).
@@ -51,6 +52,31 @@ function normalizeEmbeddingModelId(rawModelId: string): string {
 }
 
 /**
+ * Возвращает id embedding-модели из env в корректном формате для SDK.
+ *
+ * Примеры:
+ * - `models/text-embedding-004` → `text-embedding-004`
+ * - `text-embedding-004`        → `text-embedding-004`
+ * - `embedding-001`             → `embedding-001`
+ */
+export function resolveEmbeddingModelId(): string {
+  return normalizeEmbeddingModelId(
+    process.env.RAG_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL,
+  );
+}
+
+/**
+ * Резервная embedding-модель Gemini.
+ *
+ * ЗАЧЕМ:
+ * - некоторые аккаунты/версии API не видят `text-embedding-004` в `v1beta`;
+ * - в таком случае делаем безопасный retry на `embedding-001`.
+ */
+export function getEmbeddingFallbackModelId(): string {
+  return EMBEDDING_FALLBACK_MODEL;
+}
+
+/**
  * Читает обязательный API-ключ или бросает понятную ошибку для UI.
  */
 export function assertAiCredentials(): { geminiKey: string } {
@@ -72,9 +98,7 @@ export function resolveRagModels(): RagModels {
   const { geminiKey } = assertAiCredentials();
   const chatModelId =
     process.env.RAG_CHAT_MODEL?.trim() || DEFAULT_CHAT_MODEL;
-  const embeddingModelId = normalizeEmbeddingModelId(
-    process.env.RAG_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL,
-  );
+  const embeddingModelId = resolveEmbeddingModelId();
   const google = createGoogleGenerativeAI({
     apiKey: geminiKey,
   });

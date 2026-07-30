@@ -82,7 +82,7 @@ src/
 | `NEXT_PUBLIC_SUPABASE_URL` | для векторов | URL проекта Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | для векторов | Публичный anon key (с RLS) |
 | `RAG_CHAT_MODEL` | нет | По умолчанию `gemini-2.5-flash` |
-| `RAG_EMBEDDING_MODEL` | нет | По умолчанию `text-embedding-004` |
+| `RAG_EMBEDDING_MODEL` | нет | По умолчанию `embedding-001` (опционально `text-embedding-004`) |
 
 ### Supabase + pgvector
 
