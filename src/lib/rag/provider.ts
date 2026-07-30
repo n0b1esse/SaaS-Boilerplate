@@ -18,10 +18,14 @@ const DEFAULT_CHAT_MODEL = "gemini-2.5-flash";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-004";
 
 /**
- * Целевая размерность векторов под текущую схему Supabase (vector(1536)).
- * Её же используем в embeddings.ts для нормализации и валидации.
+ * Целевая размерность векторов под текущую схему Supabase (vector(768)).
+ *
+ * ПОЧЕМУ 768:
+ * - Gemini `text-embedding-004` возвращает embedding длиной 768;
+ * - колонка `document_chunks.embedding` в schema.sql синхронизирована на vector(768);
+ * - одинаковая размерность в ingest/query обязательна для корректной cosine-метрики.
  */
-export const RAG_VECTOR_DIMENSIONS = 1536 as const;
+export const RAG_VECTOR_DIMENSIONS = 768 as const;
 
 export interface RagModels {
   readonly chatModel: LanguageModel;

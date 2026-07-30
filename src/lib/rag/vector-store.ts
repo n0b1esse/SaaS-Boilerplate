@@ -72,7 +72,7 @@ export async function insertEmbeddedChunks(params: {
     return {
       content: chunk.content,
       metadata,
-      // number[] уходит в PostgREST и сохраняется как vector(1536)
+      // number[] уходит в PostgREST и сохраняется как vector(768)
       embedding: [...chunk.embedding],
     };
   });

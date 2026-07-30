@@ -27,7 +27,7 @@ import {
   toRagFileMeta,
 } from "@/lib/rag/extract";
 import { generateRagAnswer } from "@/lib/rag/generate";
-import { assertAiCredentials } from "@/lib/rag/provider";
+import { assertAiCredentials, RAG_VECTOR_DIMENSIONS } from "@/lib/rag/provider";
 import {
   deleteChunksByDocumentId,
   insertEmbeddedChunks,
@@ -131,10 +131,27 @@ async function ingestTextToSupabase(params: {
    * ВАЖНО ДЛЯ SUPABASE:
    * - в провайдере вызывается `google.textEmbeddingModel('text-embedding-004')`
    *   (без префикса `models/`, он отсекается нормализатором);
-   * - затем embeddings.ts приводит длину вектора к 1536,
-   *   чтобы точно совпасть с колонкой `document_chunks.embedding vector(1536)`.
+   * - `text-embedding-004` возвращает вектор размерности 768;
+   * - затем embeddings.ts дополнительно нормализует длину к
+   *   `RAG_VECTOR_DIMENSIONS` (= 768), чтобы 1-в-1 совпасть с колонкой
+   *   `document_chunks.embedding vector(768)` в Supabase.
+   *
+   * Поток данных здесь:
+   * textChunks[] → embedMany(Gemini) → number[768] на каждый чанк
+   * → insertEmbeddedChunks(...) → PostgREST → Postgres (pgvector).
    */
   const embeddedChunks = await embedTextChunks(textChunks);
+  // Защита контракта: перед INSERT убеждаемся, что длина векторов = vector(768).
+  const hasInvalidChunkEmbedding = embeddedChunks.some(
+    (chunk) => chunk.embedding.length !== RAG_VECTOR_DIMENSIONS,
+  );
+  if (hasInvalidChunkEmbedding) {
+    return errorResponse(
+      `Некорректная размерность embedding: ожидается ${RAG_VECTOR_DIMENSIONS}`,
+      "INTERNAL",
+      500,
+    );
+  }
 
   // На всякий случай чистим одноимённый document_id (для идемпотентности)
   await deleteChunksByDocumentId(documentId);
@@ -281,8 +298,22 @@ async function handleQuery(
   }
 
   try {
-    // 1) Векторизуем вопрос той же Gemini embedding-моделью и той же размерностью.
+    /**
+     * 1) Векторизуем вопрос той же Gemini embedding-моделью.
+     *
+     * КРИТИЧНО:
+     * - query embedding и chunk embeddings обязаны иметь одинаковую длину;
+     * - обе ветки (ingest и query) приводятся к `RAG_VECTOR_DIMENSIONS` (768),
+     *   иначе `match_chunks` с `vector(768)` вернёт ошибку несовпадения типов.
+     */
     const questionEmbedding = await embedQuery(question);
+    if (questionEmbedding.length !== RAG_VECTOR_DIMENSIONS) {
+      return errorResponse(
+        `Некорректная размерность query embedding: ожидается ${RAG_VECTOR_DIMENSIONS}`,
+        "INTERNAL",
+        500,
+      );
+    }
 
     // 2) Cosine-поиск в Postgres через rpc('match_chunks')
     const sources = await matchChunksFromSupabase({

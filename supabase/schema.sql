@@ -17,14 +17,14 @@
 -- -----------------------------------------------------------------------------
 -- Включаем расширение pgvector.
 -- ЗАЧЕМ: появляется тип vector(N) и операторы расстояния (<->, <=> , <#>).
--- Без этой строки CREATE TABLE с embedding vector(1536) упадёт.
+-- Без этой строки CREATE TABLE с embedding vector(768) упадёт.
 -- -----------------------------------------------------------------------------
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- -----------------------------------------------------------------------------
 -- Таблица document_chunks
 -- Одна строка = один фрагмент текста + его векторный эмбеддинг.
--- Колонки по ТЗ: id, content, metadata jsonb, embedding vector(1536).
+-- Колонки по ТЗ: id, content, metadata jsonb, embedding vector(768).
 -- document_id и chunk_index кладём в metadata, чтобы фильтровать поиск по файлу.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.document_chunks (
@@ -43,10 +43,10 @@ CREATE TABLE IF NOT EXISTS public.document_chunks (
   -- }
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-  -- Вектор эмбеддинга размерности 1536
-  -- (OpenAI text-embedding-3-small по умолчанию).
+  -- Вектор эмбеддинга размерности 768
+  -- (Gemini text-embedding-004 по умолчанию).
   -- ВАЖНО: та же модель и dimensions должны использоваться и при ingest, и при query.
-  embedding vector(1536) NOT NULL,
+  embedding vector(768) NOT NULL,
 
   -- Служебная метка времени (удобно чистить старые чанки)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS public.document_chunks (
 COMMENT ON TABLE public.document_chunks IS
   'RAG-чанки Nexus: content + metadata + pgvector embedding';
 COMMENT ON COLUMN public.document_chunks.embedding IS
-  'Вектор text-embedding-3-small (1536 измерений)';
+  'Вектор Gemini text-embedding-004 (768 измерений)';
 COMMENT ON COLUMN public.document_chunks.metadata IS
   'JSON: document_id, chunk_index, filename и др.';
 
@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx
 -- Функция match_chunks — косинусный (semantic) поиск ближайших фрагментов
 --
 -- ВХОД (из Next.js через supabase.rpc('match_chunks', {...})):
---   query_embedding     — embedding вопроса пользователя (vector/number[1536])
+--   query_embedding     — embedding вопроса пользователя (vector/number[768])
 --   match_count         — сколько чанков вернуть (top-k), по умолчанию 4
 --   match_threshold     — минимальная similarity (0..1), по умолчанию 0.5
 --   filter_document_id  — опционально: искать только чанки одного файла
@@ -93,7 +93,7 @@ CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.match_chunks (
   -- Embedding вопроса (тот же model/dimensions, что при записи чанков!)
-  query_embedding vector(1536),
+  query_embedding vector(768),
   -- Сколько лучших результатов вернуть
   match_count INTEGER DEFAULT 4,
   -- Порог отсечения слабых совпадений
