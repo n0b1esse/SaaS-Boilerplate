@@ -15,6 +15,23 @@
  */
 
 /**
+ * Проверяет, что строка — валидный HTTP(S) URL для Supabase SDK.
+ * Частая ошибка на Vercel: `xxxx.supabase.co` без префикса `https://`.
+ */
+function assertValidSupabaseUrl(url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("protocol");
+    }
+  } catch {
+    throw new Error(
+      `Некорректный NEXT_PUBLIC_SUPABASE_URL: «${url}». Укажите полный URL вида https://<project-ref>.supabase.co (Supabase → Project Settings → API → Project URL).`,
+    );
+  }
+}
+
+/**
  * Возвращает URL Supabase-проекта.
  * Пример: https://abcdefgh.supabase.co
  */
@@ -29,6 +46,7 @@ export function getSupabaseUrl(): string {
     );
   }
 
+  assertValidSupabaseUrl(url);
   return url;
 }
 
@@ -56,10 +74,19 @@ export function hasSupabaseCredentials(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
-  return Boolean(
-    url &&
-      key &&
-      url !== "your-project-url" &&
-      key !== "your-anon-key",
-  );
+  if (
+    !url ||
+    !key ||
+    url === "your-project-url" ||
+    key === "your-anon-key"
+  ) {
+    return false;
+  }
+
+  try {
+    assertValidSupabaseUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -33,7 +33,7 @@ import {
   insertEmbeddedChunks,
   matchChunksFromSupabase,
 } from "@/lib/rag/vector-store";
-import { hasSupabaseCredentials } from "@/lib/supabase/env";
+import { hasSupabaseCredentials, getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
 import type {
   RagApiResponse,
   RagErrorResponse,
@@ -80,11 +80,23 @@ function ensureAiKeys(): NextResponse<RagApiResponse> | null {
 function ensureSupabase(): NextResponse<RagApiResponse> | null {
   if (!hasSupabaseCredentials()) {
     return errorResponse(
-      "Не заданы NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY. Добавьте их в Vercel Environment Variables и выполните supabase/schema.sql.",
+      "Не заданы или некорректны NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY. URL должен начинаться с https:// (пример: https://<ref>.supabase.co). Задайте в Vercel → Settings → Environment Variables и сделайте Redeploy.",
       "MISSING_SUPABASE",
       503,
     );
   }
+
+  try {
+    getSupabaseUrl();
+    getSupabaseAnonKey();
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "Ошибка конфигурации Supabase",
+      "MISSING_SUPABASE",
+      503,
+    );
+  }
+
   return null;
 }
 
