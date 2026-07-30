@@ -12,8 +12,39 @@
 
 import { embed, embedMany } from "ai";
 
-import { resolveRagModels } from "@/lib/rag/provider";
+import {
+  RAG_VECTOR_DIMENSIONS,
+  resolveRagModels,
+} from "@/lib/rag/provider";
 import type { EmbeddedChunk, TextChunk } from "@/types/rag";
+
+/**
+ * Нормализует размерность вектора под vector(1536) в Supabase.
+ *
+ * ЗАЧЕМ:
+ * - `text-embedding-004` может вернуть размерность меньше 1536;
+ * - Postgres `vector(1536)` требует фиксированную длину на INSERT;
+ * - паддинг нулями сохраняет относительную близость векторов,
+ *   потому что и query, и chunks проходят одинаковую трансформацию.
+ *
+ * Поток:
+ * Gemini embedding[] → trim/pad до 1536 → безопасный INSERT/RPC в Supabase.
+ */
+function normalizeEmbeddingDimensions(
+  embedding: readonly number[],
+): number[] {
+  // Если модель вернула больше значений, отрезаем хвост до целевой длины.
+  if (embedding.length >= RAG_VECTOR_DIMENSIONS) {
+    return embedding.slice(0, RAG_VECTOR_DIMENSIONS);
+  }
+
+  // Если значений меньше, дополняем нулями до vector(1536).
+  const padded = [...embedding];
+  while (padded.length < RAG_VECTOR_DIMENSIONS) {
+    padded.push(0);
+  }
+  return padded;
+}
 
 /**
  * Строит эмбеддинги сразу для всего массива чанков (batch).
@@ -35,7 +66,8 @@ export async function embedTextChunks(
 
   return chunks.map((chunk, index) => ({
     ...chunk,
-    embedding: embeddings[index] ?? [],
+    // Каждый вектор приводим к размерности vector(1536) перед записью в БД.
+    embedding: normalizeEmbeddingDimensions(embeddings[index] ?? []),
   }));
 }
 
@@ -50,5 +82,6 @@ export async function embedQuery(question: string): Promise<number[]> {
     value: question,
   });
 
-  return embedding;
+  // Вопрос тоже нормализуем до той же длины, что и document_chunks.embedding.
+  return normalizeEmbeddingDimensions(embedding);
 }

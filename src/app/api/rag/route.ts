@@ -5,7 +5,7 @@
  * 1) ingest (multipart file ИЛИ JSON { action:'ingest', text })
  *    → текст → чанки → embeddings → INSERT document_chunks
  * 2) query  (JSON { action:'query', question, documentId })
- *    → embed(question) → rpc('match_chunks') → LLM ответ
+ *    → embed(question) → rpc('match_chunks') → Gemini-ответ
  *
  * Поток данных целиком:
  * Browser UI
@@ -59,7 +59,7 @@ function errorResponse(
 }
 
 /**
- * Проверяет, что заданы ключи OpenAI/Gateway.
+ * Проверяет, что задан ключ Gemini API.
  */
 function ensureAiKeys(): NextResponse<RagApiResponse> | null {
   try {
@@ -67,7 +67,7 @@ function ensureAiKeys(): NextResponse<RagApiResponse> | null {
     return null;
   } catch (error) {
     return errorResponse(
-      error instanceof Error ? error.message : "Нет API-ключа AI",
+      error instanceof Error ? error.message : "Нет API-ключа Gemini",
       "MISSING_API_KEY",
       401,
     );
@@ -93,7 +93,7 @@ function ensureSupabase(): NextResponse<RagApiResponse> | null {
  *
  * Шаги:
  * 1) нарезать текст на чанки
- * 2) получить embeddings через AI SDK
+ * 2) получить embeddings через Gemini (`text-embedding-004`)
  * 3) записать строки в document_chunks
  */
 async function ingestTextToSupabase(params: {
@@ -125,7 +125,7 @@ async function ingestTextToSupabase(params: {
     );
   }
 
-  // Batch-эмбеддинги всех чанков (OpenAI text-embedding-3-small → 1536 dims)
+  // Batch-эмбеддинги всех чанков через Gemini и нормализация под vector(1536)
   const embeddedChunks = await embedTextChunks(textChunks);
 
   // На всякий случай чистим одноимённый document_id (для идемпотентности)
@@ -244,7 +244,7 @@ async function handleTextIngest(
 }
 
 /**
- * QUERY: принять текст вопроса → embedding → match_chunks → LLM.
+ * QUERY: принять текст вопроса → embedding → match_chunks → Gemini.
  *
  * Это основной RAG-эндпоинт после загрузки документа.
  */
@@ -292,7 +292,16 @@ async function handleQuery(
       );
     }
 
-    // 3) Собираем промпт из top-k и генерируем ответ LLM
+    /**
+     * 3) Собираем промпт из top-k и генерируем ответ Gemini.
+     *
+     * Как Gemini получает контекст:
+     * - `sources` уже содержит самые релевантные фрагменты из Supabase (`match_chunks`);
+     * - `buildRagPrompt` внутри generateRagAnswer складывает system-инструкцию,
+     *   вопрос пользователя и эти фрагменты в единый prompt;
+     * - `generateText` отправляет prompt в модель Gemini (`gemini-2.5-flash`
+     *   по умолчанию), и модель отвечает строго в рамках переданного контекста.
+     */
     const answer = await generateRagAnswer(question, sources);
 
     return NextResponse.json({

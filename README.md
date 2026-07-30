@@ -78,19 +78,16 @@ src/
 
 | Переменная | Обязательно | Зачем |
 |------------|-------------|--------|
-| `OPENAI_API_KEY` | да* | Прямой доступ к OpenAI (chat + embeddings) |
-| `AI_GATEWAY_API_KEY` | да* | Альтернатива: Vercel AI Gateway |
+| `GEMINI_API_KEY` | да | Ключ Google Gemini API (chat + embeddings) |
 | `NEXT_PUBLIC_SUPABASE_URL` | для векторов | URL проекта Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | для векторов | Публичный anon key (с RLS) |
-| `RAG_CHAT_MODEL` | нет | По умолчанию `gpt-4.1-mini` |
-| `RAG_EMBEDDING_MODEL` | нет | По умолчанию `text-embedding-3-small` |
-
-\* Нужен **хотя бы один** из ключей: `OPENAI_API_KEY` или `AI_GATEWAY_API_KEY`.
+| `RAG_CHAT_MODEL` | нет | По умолчанию `gemini-2.5-flash` |
+| `RAG_EMBEDDING_MODEL` | нет | По умолчанию `text-embedding-004` |
 
 ### Supabase + pgvector
 
 1. Создайте проект на [supabase.com](https://supabase.com).
-2. SQL Editor → выполните скрипт `supabase/schema.sql` (расширение `vector`, таблица `documents`, RPC `match_documents`).
+2. SQL Editor → выполните скрипт `supabase/schema.sql` (расширение `vector`, таблица `document_chunks`, RPC `match_chunks`).
 3. Скопируйте Project URL и anon key в env (см. таблицу выше).
 4. Клиенты Next.js: `src/lib/supabase/client.ts` (браузер) и `src/lib/supabase/server.ts` (RSC/API).
 
